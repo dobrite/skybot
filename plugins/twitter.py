@@ -50,4 +50,4 @@ def twitter(inp, api_key=None):
     text = unescape(text, {'&apos;': "'", "&quot;": '"'})
     time = strftime('%Y-%m-%d %H:%M:%S', strptime(time, '%a %b %d %H:%M:%S +0000 %Y'))
 
-    return "%s %s: %s" % (time, screen_name, text)
+    return "%s %s: %s" % (time, screen_name, text.replace('\n', ' '))
