@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import random
 import re
 
 from util import hook
@@ -16,6 +17,15 @@ def munge(inp, munge_count=0):
             if reps == munge_count:
                 break
     return inp
+
+def winnow(inputs, limit=400):
+    "remove random elements from the list until it's short enough"
+    combiner = lambda l: ', '.join(l)
+    suffix = ''
+    while len(combiner(inputs)) >= limit:
+        inputs.pop(random.randint(0, len(inputs) - 1))
+        suffix = ' ...'
+    return combiner(inputs) + suffix
 
 
 def add_tag(db, chan, nick, subject):
@@ -53,10 +63,7 @@ def get_tag_counts_by_chan(db, chan):
     if not tags:
         return 'no tags in %s' % chan
     ret = '%s tags: ' % chan
-    ret += ', '.join('%s (%d)' % row for row in tags)
-    if len(ret) > 400:
-        ret = ret[:ret.rfind(' ', 0, 400)] + '...'
-    return ret
+    return winnow(['%s (%d)' % row for row in tags])
 
 
 def get_tags_by_nick(db, chan, nick):
@@ -65,20 +72,32 @@ def get_tags_by_nick(db, chan, nick):
                       " order by lower(subject)", (nick, chan)).fetchall()
 
 
-def get_nicks_by_tag(db, chan, subject):
-    nicks = db.execute("select nick from tag where lower(subject)=lower(?)"
-                       " and chan=?"
-                       " order by lower(nick)", (subject, chan)).fetchall()
+def get_nicks_by_tagset(db, chan, tagset):
+    nicks = None
+    for tag in tagset.split('&'):
+        tag = tag.strip()
 
-    nicks = [munge(x[0], 1) for x in nicks]
+        current_nicks = db.execute("select nick from tag where " +
+                                   "lower(subject)=lower(?)"
+                                   " and chan=?", (tag, chan)).fetchall()
+
+        if not current_nicks:
+            return "tag '%s' not found" % tag
+
+        if nicks is None:
+            nicks = set(current_nicks)
+        else:
+            nicks.intersection_update(current_nicks)
+
+    nicks = [munge(x[0], 1) for x in sorted(nicks)]
     if not nicks:
-        return 'tag not found'
-    return 'nicks tagged "%s": ' % subject + ', '.join(nicks)
+        return 'no tags found in intersection of "%s"' % tagset
+    return 'nicks tagged "%s": ' % tagset + winnow(nicks)
 
 
 @hook.command
 def tag(inp, chan='', db=None):
-    '.tag <nick>/[add|del] <nick> <tag>/list [tag] -- get list of tags on ' \
+    '.tag <nick>/[add|del] <nick> <tag>/list [tag] [& tag...] -- get list of tags on ' \
     '<nick>/(un)marks <nick> as <tag>/gets list of tags/nicks marked as [tag]'
 
     db.execute('create table if not exists tag(chan, subject, nick)')
@@ -90,7 +109,7 @@ def tag(inp, chan='', db=None):
     if retrieve:
         search_tag = retrieve.group(1)
         if search_tag:
-            return get_nicks_by_tag(db, chan, search_tag)
+            return get_nicks_by_tagset(db, chan, search_tag)
         else:
             return get_tag_counts_by_chan(db, chan)
     if delete:
@@ -105,8 +124,8 @@ def tag(inp, chan='', db=None):
         if not tags:
             return get_nicks_by_tag(db, chan, inp)
         else:
-            return 'tags for "%s": ' % munge(inp, 1) + ', '.join(
-                tag[0] for tag in tags)
+            return 'tags for "%s": ' % munge(inp, 1) + winnow([
+                tag[0] for tag in tags])
 
 
 character_replacements = {
